@@ -88,6 +88,7 @@ export interface PostStats {
   self: number;
   media: number;
   link: number;
+  comments: number;
   failed: number;
   skipped_due_to_duplicate: number;
   skipped_due_to_fileType: number;

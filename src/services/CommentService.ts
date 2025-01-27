@@ -1,4 +1,5 @@
 import axios from "axios";
+import { UserAgentService } from "./UserAgentService";
 import { JSONcomment, CSVComment, PostComments } from "../types/output";
 import { LogService } from "./LogService";
 import { RuntimeConfig } from "../types/runtime";
@@ -8,6 +9,9 @@ import { RedditPost } from "types/types";
 export class CommentService {
   private logger: LogService;
   private config: RuntimeConfig;
+  private maxRetries: number = 3;
+  private initialRetryDelay: number = 1000;
+  private postDelayMilliseconds: number = 250;
 
   constructor(config: RuntimeConfig, logger: LogService) {
     this.config = config;
@@ -20,37 +24,68 @@ export class CommentService {
     }
 
     const postUrl = `https://www.reddit.com${postPermalink}.json`;
+    let retryCount = 0;
+    let delay = this.initialRetryDelay;
 
-    try {
-      const response = await axios.get(postUrl);
-      const comments = response.data[1].data.children;
+    while (retryCount <= this.maxRetries) {
+      try {
+        const response = await axios.get(postUrl, UserAgentService.getAxiosConfig());
+        const comments = response.data[1].data.children;
 
-      let OriginalData: JSONcomment = {
-        user: post.author,
-        comment: `${post.title} | ${post.selftext !== "" ? post.selftext! : ""}`,
-        votes: post.score,
-        child: [],
-      };
+        // Sleep after successful fetch to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, this.postDelayMilliseconds));
 
-      // First convert to our base JSON format
-      const jsonComments = this.convertToJsonFormat(comments);
-      OriginalData.child = jsonComments;
+        let OriginalData: JSONcomment = {
+          user: post.author,
+          comment: `${post.title} | ${post.selftext !== "" ? post.selftext! : ""}`,
+          votes: post.score,
+          child: [],
+        };
 
-      // Then convert to the specified format based on config
-      switch (this.config.file_format_options.comment_format) {
-        case "json":
-          return JSON.stringify([OriginalData], null, 2);
-        case "csv":
-          return this.convertToCSV([OriginalData]);
-        case "txt":
-          return this.convertToTxt([OriginalData]);
-        default:
-          return JSON.stringify([OriginalData], null, 2);
+        // First convert to our base JSON format
+        const jsonComments = this.convertToJsonFormat(comments);
+        OriginalData.child = jsonComments;
+
+        // Then convert to the specified format based on config
+        switch (this.config.file_format_options.comment_format) {
+          case "json":
+            return JSON.stringify([OriginalData], null, 2);
+          case "csv":
+            return this.convertToCSV([OriginalData]);
+          case "txt":
+            return this.convertToTxt([OriginalData]);
+          default:
+            return JSON.stringify([OriginalData], null, 2);
+        }
+      } catch (err: any) {
+        const isLastAttempt = retryCount === this.maxRetries;
+        const isRateLimitError = err.response?.status === 429;
+        const isServerError = err.response?.status >= 500;
+        
+        if (!isLastAttempt && (isRateLimitError || isServerError || err.code === 'ECONNRESET')) {
+          this.logger.log(
+            `\n⚠️ Attempt ${retryCount + 1}/${this.maxRetries + 1} failed to fetch comments. Retrying in ${delay/1000} seconds...`,
+            true
+          );
+          
+          await new Promise(resolve => setTimeout(resolve, delay));
+          retryCount++;
+          delay *= 2; // Exponential backoff
+          continue;
+        }
+
+        this.logger.log(
+          `Failed to fetch comments for post: ${
+            isRateLimitError ? 'Rate limit exceeded.' :
+            isServerError ? 'Reddit server error.' :
+            err.message || 'Unknown error'
+          }`,
+          true
+        );
+        return null;
       }
-    } catch (error) {
-      this.logger.log(`Failed to fetch comments for post: ${error}`, true);
-      return null;
     }
+    return null;
   }
 
   private convertToJsonFormat(comments: any[]): PostComments {

@@ -37,6 +37,7 @@ export class DownloadController {
       self: 0,
       media: 0,
       link: 0,
+      comments: 0,
       failed: 0,
       skipped_due_to_duplicate: 0,
       skipped_due_to_fileType: 0,
@@ -83,6 +84,7 @@ export class DownloadController {
               `Stats: ${this.downloadedPosts.media} media, ` +
               `${this.downloadedPosts.self} self posts, ` +
               `${this.downloadedPosts.link} links, ` +
+              `${this.downloadedPosts.comments} comments, ` +
               `${this.downloadedPosts.failed} failed, ` +
               `${this.downloadedPosts.skipped_due_to_duplicate} duplicates, ` +
               `${this.downloadedPosts.skipped_due_to_fileType} skipped`,
@@ -307,6 +309,7 @@ export class DownloadController {
   private async getPostComments(post: RedditPost): Promise<string | null> {
     const comments = this.commentService.fetchAndFormatComments(post.permalink, post);
     this.logger.log(`Fetched comments for ${post.title}`, true);
+    this.downloadedPosts.comments++;
     return comments;
   }
 

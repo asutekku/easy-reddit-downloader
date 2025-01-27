@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { UserAgentService } from './UserAgentService';
 import { RuntimeConfig } from '../types/runtime';
 import { LogService } from './LogService';
 import { PostType, RedditApiResponse, RedditPost } from '../types/types';
@@ -10,6 +11,8 @@ export class RedditService {
     private config: RuntimeConfig;
     private logger: LogService;
     private postDelayMilliseconds: number = 250;
+    private maxRetries: number = 5;
+    private initialRetryDelay: number = 5000;
 
     constructor(config: RuntimeConfig, logger: LogService) {
         this.config = config;
@@ -17,24 +20,50 @@ export class RedditService {
     }
 
     public async fetchPosts(subreddit: string, lastPostId: string | null, limit: number): Promise<RedditApiResponse | null> {
-        try {
-            const url = this.buildRedditUrl(subreddit, lastPostId, limit);
-            this.logger.log(`\n\n👀 Requesting posts from ${url}\n`, true);
+        let retryCount = 0;
+        let delay = this.initialRetryDelay;
 
-            const response = await axios.get(url);
-            const data: RedditApiResponse = response.data;
+        while (retryCount <= this.maxRetries) {
+            try {
+                const url = this.buildRedditUrl(subreddit, lastPostId, limit);
+                this.logger.log(`\n\n👀 Requesting posts from ${url}\n`, true);
 
-            if (!data || data.message === "Not Found" || data.data.children.length === 0) {
-                throw new Error("No data found");
+            const response = await axios.get(url, UserAgentService.getAxiosConfig());
+                const data: RedditApiResponse = response.data;
+
+                if (!data || data.message === "Not Found" || data.data.children.length === 0) {
+                    throw new Error("No data found");
+                }
+
+                return data;
+            } catch (err: any) {
+                const isLastAttempt = retryCount === this.maxRetries;
+                const isRateLimitError = err.response?.status === 429;
+                const isServerError = err.response?.status >= 500;
+                
+                if (!isLastAttempt && (isRateLimitError || isServerError || err.code === 'ECONNRESET')) {
+                    this.logger.log(
+                        `\n⚠️ Attempt ${retryCount + 1}/${this.maxRetries + 1} failed. Retrying in ${delay/1000} seconds...`,
+                        true
+                    );
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    retryCount++;
+                    delay *= 2; // Exponential backoff
+                    continue;
+                }
+
+                this.logger.logError(
+                    `\n\nERROR: There was a problem fetching posts for ${subreddit}. ${
+                        isRateLimitError ? 'Rate limit exceeded.' :
+                        isServerError ? 'Reddit server error.' :
+                        'This is likely because the subreddit is private, banned, or doesn\'t exist.'
+                    }`
+                );
+                return null;
             }
-
-            return data;
-        } catch (err) {
-            this.logger.logError(
-                `\n\nERROR: There was a problem fetching posts for ${subreddit}. This is likely because the subreddit is private, banned, or doesn't exist.`
-            );
-            return null;
         }
+        return null;
     }
 
     private buildRedditUrl(subreddit: string, lastPostId: string | null, limit: number): string {
@@ -87,7 +116,8 @@ export class RedditService {
             const response = await axios({
                 method: "GET",
                 url: downloadURL,
-                responseType: "stream"
+                responseType: "stream",
+                ...UserAgentService.getAxiosConfig()
             });
 
             return new Promise((resolve, reject) => {

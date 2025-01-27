@@ -20,7 +20,6 @@ export class CommentService {
     }
 
     const postUrl = `https://www.reddit.com${postPermalink}.json`;
-    console.log(postUrl);
 
     try {
       const response = await axios.get(postUrl);

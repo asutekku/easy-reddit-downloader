@@ -47,7 +47,6 @@ export class DownloadController {
     this.logger.log(`Starting downloading for r/${subreddit}`, false);
     this.startTime = new Date();
     this.fileService.makeDirectories();
-    console.log(this.config);
 
     try {
       const limit = 25;

@@ -2,24 +2,25 @@ import axios from "axios";
 import { UserAgentService } from "./UserAgentService";
 import { JSONcomment, CSVComment, PostComments } from "../types/output";
 import { LogService } from "./LogService";
-import { RuntimeConfig } from "../types/runtime";
 import { formatCommentsAsTree } from "../utils/commentTree";
 import { RedditPost } from "types/types";
+import { ConfigService } from "./ConfigService";
 
 export class CommentService {
   private logger: LogService;
-  private config: RuntimeConfig;
-  private maxRetries: number = 3;
-  private initialRetryDelay: number = 1000;
-  private postDelayMilliseconds: number = 250;
+  private configService: ConfigService;
+  private maxRetries: number = 5;
+  private initialRetryDelay: number = 5000;
+  private postDelayMilliseconds: number = 500;
 
-  constructor(config: RuntimeConfig, logger: LogService) {
-    this.config = config;
-    this.logger = logger;
+  constructor(configService: ConfigService) {
+    this.configService = configService;
+    this.logger = configService.getLogger();
   }
 
   public async fetchAndFormatComments(postPermalink: string, post: RedditPost): Promise<string | null> {
-    if (!this.config.download_comments) {
+    const config = this.configService.getRuntimeConfig();
+    if (!config.download_comments) {
       return null;
     }
 
@@ -47,7 +48,7 @@ export class CommentService {
         OriginalData.child = jsonComments;
 
         // Then convert to the specified format based on config
-        switch (this.config.file_format_options.comment_format) {
+        switch (config.file_format_options.comment_format) {
           case "json":
             return JSON.stringify([OriginalData], null, 2);
           case "csv":

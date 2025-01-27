@@ -1,30 +1,28 @@
-import { RuntimeConfig } from "../types/runtime";
 import { LogService } from "../services/LogService";
 import { FileService } from "../services/FileService";
 import { RedditService } from "../services/RedditService";
 import { CommentService } from "../services/CommentService";
 import { PostStats, RedditPost } from "../types/types";
+import { ConfigService } from "../services/ConfigService";
 import fs from "fs";
 
 export class DownloadController {
-  private config: RuntimeConfig;
+  private configService: ConfigService;
   private logger: LogService;
   private fileService: FileService;
   private redditService: RedditService;
   private downloadedPosts: PostStats;
   private startTime: Date | null = null;
-
   private commentService: CommentService;
 
   constructor(
-    config: RuntimeConfig,
-    logger: LogService,
+    configService: ConfigService,
     fileService: FileService,
     redditService: RedditService,
     commentService: CommentService
   ) {
-    this.config = config;
-    this.logger = logger;
+    this.configService = configService;
+    this.logger = configService.getLogger();
     this.fileService = fileService;
     this.redditService = redditService;
     this.commentService = commentService;
@@ -93,9 +91,10 @@ export class DownloadController {
         }
       }
 
+      const config = this.configService.getRuntimeConfig();
       // Handle next batch if needed
       const shouldContinue =
-        this.config.numberOfPosts === 0
+        config.numberOfPosts === 0
           ? response.data.children.length === limit // If numberOfPosts is 0, continue until we get less than limit
           : this.getPostsRemaining() > 0; // Otherwise check remaining posts
 
@@ -144,12 +143,13 @@ export class DownloadController {
   }
 
   private async processSelfPost(post: RedditPost, fileName: string, downloadDir: string): Promise<void> {
-    if (!this.config.download_self_posts) {
+    const config = this.configService.getRuntimeConfig();
+    if (!config.download_self_posts) {
       this.downloadedPosts.skipped_due_to_fileType++;
       return;
     }
 
-    const filePath = `${downloadDir}/${fileName}.${this.config.file_format_options.comment_format}`;
+    const filePath = `${downloadDir}/${fileName}.${config.file_format_options.comment_format}`;
     if (!(await this.fileService.shouldDownloadFile(filePath))) {
       this.downloadedPosts.skipped_due_to_duplicate++;
       return;
@@ -165,13 +165,14 @@ export class DownloadController {
   }
 
   private async processMediaPost(post: RedditPost, fileName: string, downloadDir: string): Promise<void> {
-    if (!this.config.download_media_posts) {
+    const config = this.configService.getRuntimeConfig();
+    if (!config.download_media_posts) {
       this.downloadedPosts.skipped_due_to_fileType++;
       return;
     }
 
     try {
-      if (!this.config.download_text_content_only) {
+      if (!config.download_text_content_only) {
         const { downloadUrl, fileType } = await this.getMediaDownloadInfo(post);
         const filePath = `${downloadDir}/${fileName}.${fileType}`;
 
@@ -189,11 +190,11 @@ export class DownloadController {
       // Download comments if enabled
       const comments = await this.getPostComments(post);
       if (comments) {
-        const commentFilePath = `${downloadDir}/${fileName}_comments.${this.config.file_format_options.comment_format}`;
+        const commentFilePath = `${downloadDir}/${fileName}_comments.${config.file_format_options.comment_format}`;
         const commentContent =
-          this.config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
+          config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
         await this.fileService.writeFile(commentFilePath, commentContent);
-      } else if (!this.config.download_text_content_only) {
+      } else if (!config.download_text_content_only) {
         // Only increment skipped if we're not in text-only mode and no comments were downloaded
         this.downloadedPosts.skipped_due_to_fileType++;
       }
@@ -203,13 +204,14 @@ export class DownloadController {
   }
 
   private async processGalleryPost(post: RedditPost, fileName: string, downloadDir: string): Promise<void> {
-    if (!this.config.download_gallery_posts || !post.gallery_data || !post.media_metadata) {
+    const config = this.configService.getRuntimeConfig();
+    if (!config.download_gallery_posts || !post.gallery_data || !post.media_metadata) {
       this.downloadedPosts.skipped_due_to_fileType++;
       return;
     }
 
     try {
-      if (!this.config.download_text_content_only) {
+      if (!config.download_text_content_only) {
         const galleryDir = `${downloadDir}/${fileName}`;
         if (!(await this.fileService.shouldDownloadFile(galleryDir))) {
           this.downloadedPosts.skipped_due_to_duplicate++;
@@ -237,13 +239,13 @@ export class DownloadController {
       // Download comments if enabled
       const comments = await this.getPostComments(post);
       if (comments) {
-        const commentFilePath = this.config.download_text_content_only
-          ? `${downloadDir}/${fileName}_comments.${this.config.file_format_options.comment_format}`
-          : `${downloadDir}/${fileName}/comments.${this.config.file_format_options.comment_format}`;
+        const commentFilePath = config.download_text_content_only
+          ? `${downloadDir}/${fileName}_comments.${config.file_format_options.comment_format}`
+          : `${downloadDir}/${fileName}/comments.${config.file_format_options.comment_format}`;
         const commentContent =
-          this.config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
+          config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
         await this.fileService.writeFile(commentFilePath, commentContent);
-      } else if (!this.config.download_text_content_only) {
+      } else if (!config.download_text_content_only) {
         // Only increment skipped if we're not in text-only mode and no comments were downloaded
         this.downloadedPosts.skipped_due_to_fileType++;
       }
@@ -253,20 +255,21 @@ export class DownloadController {
   }
 
   private async processLinkPost(post: RedditPost, fileName: string, downloadDir: string): Promise<void> {
-    if (!this.config.download_link_posts) {
+    const config = this.configService.getRuntimeConfig();
+    if (!config.download_link_posts) {
       this.downloadedPosts.skipped_due_to_fileType++;
       return;
     }
 
     try {
-      if (!this.config.download_text_content_only) {
+      if (!config.download_text_content_only) {
         const filePath = `${downloadDir}/${fileName}${post.domain?.includes("youtu") ? ".mp4" : ".html"}`;
         if (!(await this.fileService.shouldDownloadFile(filePath))) {
           this.downloadedPosts.skipped_due_to_duplicate++;
           return;
         }
 
-        if (post.domain?.includes("youtu") && this.config.download_youtube_videos_experimental) {
+        if (post.domain?.includes("youtu") && config.download_youtube_videos_experimental) {
           await this.redditService.downloadYouTubeVideo(post.url!, filePath);
         } else {
           const htmlContent = `<html><body><script type='text/javascript'>window.location.href = "${post.url}";</script></body></html>`;
@@ -278,11 +281,11 @@ export class DownloadController {
       // Download comments if enabled
       const comments = await this.getPostComments(post);
       if (comments) {
-        const commentFilePath = `${downloadDir}/${fileName}_comments.${this.config.file_format_options.comment_format}`;
+        const commentFilePath = `${downloadDir}/${fileName}_comments.${config.file_format_options.comment_format}`;
         const commentContent =
-          this.config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
+          config.file_format_options.comment_format === "txt" ? `${post.title} by ${post.author}\n\n${comments}` : comments;
         await this.fileService.writeFile(commentFilePath, commentContent);
-      } else if (!this.config.download_text_content_only) {
+      } else if (!config.download_text_content_only) {
         // Only increment skipped if we're not in text-only mode and no comments were downloaded
         this.downloadedPosts.skipped_due_to_fileType++;
       }
@@ -292,8 +295,9 @@ export class DownloadController {
   }
 
   private async formatSelfPostContent(post: RedditPost): Promise<string> {
+    const config = this.configService.getRuntimeConfig();
     let content = "";
-    if (this.config.file_format_options.comment_format === "txt") {
+    if (config.file_format_options.comment_format === "txt") {
       content = `${post.title} by ${post.author}\n\n`;
       content += `${post.selftext}\n`;
       content += "------------------------------------------------\n\n";
@@ -335,8 +339,9 @@ export class DownloadController {
   }
 
   private getPostsRemaining(): number {
+    const config = this.configService.getRuntimeConfig();
     // If numberOfPosts is 0, return a large number to ensure continuation
-    if (this.config.numberOfPosts === 0) {
+    if (config.numberOfPosts === 0) {
       return Number.MAX_SAFE_INTEGER;
     }
 
@@ -347,12 +352,12 @@ export class DownloadController {
 
     // If no posts have been downloaded yet, return the total number of posts to download
     if (numericValues.every((val) => val === 0)) {
-      return this.config.numberOfPosts;
+      return config.numberOfPosts;
     }
 
     // Calculate remaining posts based on what's been downloaded
     const total = numericValues.reduce((sum, val) => sum + val, 0);
-    return this.config.numberOfPosts - total;
+    return config.numberOfPosts - total;
   }
 
   public getStats(): PostStats {

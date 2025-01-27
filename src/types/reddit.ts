@@ -1,3 +1,5 @@
+// These are full types for reddit responses. Currently not used but can be used for reference
+
 export interface RedditResponse {
   kind: string;
   message?: string;

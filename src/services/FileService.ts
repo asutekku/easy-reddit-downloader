@@ -1,25 +1,27 @@
 import fs from "fs";
-import { RuntimeConfig } from "../types/runtime";
 import { RedditPost } from "../types/types";
 import { LogService } from "./LogService";
+import { ConfigService } from "./ConfigService";
 
 export class FileService {
-  private config: RuntimeConfig;
+  private configService: ConfigService;
   private logger: LogService;
   private downloadDirectoryBase: string;
 
-  constructor(config: RuntimeConfig, logger: LogService) {
-    this.config = config;
-    this.logger = logger;
+  constructor(configService: ConfigService) {
+    this.configService = configService;
+    this.logger = configService.getLogger();
+    const config = configService.getRuntimeConfig();
     this.downloadDirectoryBase = config.downloadDirectory || "./downloads";
   }
 
   public makeDirectories(): void {
+    const config = this.configService.getRuntimeConfig();
     if (!fs.existsSync(this.downloadDirectoryBase)) {
       fs.mkdirSync(this.downloadDirectoryBase);
     }
 
-    if (this.config.separate_clean_nsfw) {
+    if (config.separate_clean_nsfw) {
       if (!fs.existsSync(`${this.downloadDirectoryBase}/clean`)) {
         fs.mkdirSync(`${this.downloadDirectoryBase}/clean`);
       }
@@ -30,8 +32,9 @@ export class FileService {
   }
 
   public getDownloadDirectory(subreddit: string, isNsfw: boolean): string {
+    const config = this.configService.getRuntimeConfig();
     let downloadDirectory: string;
-    if (!this.config.separate_clean_nsfw) {
+    if (!config.separate_clean_nsfw) {
       downloadDirectory = `${this.downloadDirectoryBase}/${subreddit}`;
     } else {
       const cleanNsfwPath = isNsfw ? "nsfw" : "clean";
@@ -46,8 +49,9 @@ export class FileService {
   }
 
   public async shouldDownloadFile(filePath: string): Promise<boolean> {
-    if (this.config.redownload_posts === true || this.config.redownload_posts === undefined) {
-      if (this.config.redownload_posts === undefined) {
+    const config = this.configService.getRuntimeConfig();
+    if (config.redownload_posts === true || config.redownload_posts === undefined) {
+      if (config.redownload_posts === undefined) {
         this.logger.logWarning(
           'ALERT: Please note that the "redownload_posts" option is now available in user_config. See the default JSON for example usage.'
         );
@@ -58,9 +62,10 @@ export class FileService {
   }
 
   public getFileName(post: RedditPost): string {
+    const config = this.configService.getRuntimeConfig();
     let fileName = "";
 
-    if (this.config.file_naming_scheme.showDate || this.config.file_naming_scheme.showDate === undefined) {
+    if (config.file_naming_scheme.showDate || config.file_naming_scheme.showDate === undefined) {
       const date = new Date(post.created * 1000);
       const year = date.getFullYear();
       const month = (date.getMonth() + 1).toString().padStart(2, "0");
@@ -68,19 +73,19 @@ export class FileService {
       fileName += `${year}-${month}-${day}`;
     }
 
-    if (this.config.file_naming_scheme.showScore || this.config.file_naming_scheme.showScore === undefined) {
+    if (config.file_naming_scheme.showScore || config.file_naming_scheme.showScore === undefined) {
       fileName += `_score=${post.score}`;
     }
 
-    if (this.config.file_naming_scheme.showSubreddit || this.config.file_naming_scheme.showSubreddit === undefined) {
+    if (config.file_naming_scheme.showSubreddit || config.file_naming_scheme.showSubreddit === undefined) {
       fileName += `_${post.subreddit}`;
     }
 
-    if (this.config.file_naming_scheme.showAuthor || this.config.file_naming_scheme.showAuthor === undefined) {
+    if (config.file_naming_scheme.showAuthor || config.file_naming_scheme.showAuthor === undefined) {
       fileName += `_${post.author}`;
     }
 
-    if (this.config.file_naming_scheme.showTitle || this.config.file_naming_scheme.showTitle === undefined) {
+    if (config.file_naming_scheme.showTitle || config.file_naming_scheme.showTitle === undefined) {
       let title = this.sanitizeFileName(post.title);
       fileName += `_${title}`;
     }

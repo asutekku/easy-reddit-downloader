@@ -1,22 +1,22 @@
 import axios from 'axios';
 import { UserAgentService } from './UserAgentService';
-import { RuntimeConfig } from '../types/runtime';
 import { LogService } from './LogService';
 import { PostType, RedditApiResponse, RedditPost } from '../types/types';
 import ytdl from 'ytdl-core';
 import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs';
+import { ConfigService } from './ConfigService';
 
 export class RedditService {
-    private config: RuntimeConfig;
+    private configService: ConfigService;
     private logger: LogService;
     private postDelayMilliseconds: number = 250;
     private maxRetries: number = 5;
     private initialRetryDelay: number = 5000;
 
-    constructor(config: RuntimeConfig, logger: LogService) {
-        this.config = config;
-        this.logger = logger;
+    constructor(configService: ConfigService) {
+        this.configService = configService;
+        this.logger = configService.getLogger();
     }
 
     public async fetchPosts(subreddit: string, lastPostId: string | null, limit: number): Promise<RedditApiResponse | null> {
@@ -67,10 +67,11 @@ export class RedditService {
     }
 
     private buildRedditUrl(subreddit: string, lastPostId: string | null, limit: number): string {
-        const baseUrl = `https://www.reddit.com/r/${subreddit}/${this.config.sorting}/.json`;
+        const config = this.configService.getRuntimeConfig();
+        const baseUrl = `https://www.reddit.com/r/${subreddit}/${config.sorting}/.json`;
         const params = new URLSearchParams({
-            sort: this.config.sorting,
-            t: this.config.time,
+            sort: config.sorting,
+            t: config.time,
             limit: limit.toString(),
             ...(lastPostId && { after: lastPostId })
         });

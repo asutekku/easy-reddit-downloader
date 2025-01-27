@@ -6,7 +6,6 @@ import { RuntimeConfig } from "./types/runtime";
 const defaultConfig = defaultConfigJson as UserConfig;
 import { ConfigService } from "./services/ConfigService";
 import { FileService } from "./services/FileService";
-import { LogService } from "./services/LogService";
 import { RedditService } from "./services/RedditService";
 import { CommentService } from "./services/CommentService";
 import { DownloadController } from "./controllers/DownloadController";
@@ -17,14 +16,20 @@ async function main() {
     // Initialize services
     const configService = new ConfigService(defaultConfig);
     await configService.loadUserConfig();
-    const logger = configService.getLogger();
-    const fileService = new FileService(configService.getRuntimeConfig(), logger);
-    const redditService = new RedditService(configService.getRuntimeConfig(), logger);
-    const commentService = new CommentService(configService.getRuntimeConfig(), logger);
+
+    // Initialize services with configService
+    const fileService = new FileService(configService);
+    const redditService = new RedditService(configService);
+    const commentService = new CommentService(configService);
 
     // Initialize controllers
     const promptController = new PromptController(configService);
-    let downloadController = new DownloadController(configService.getRuntimeConfig(), logger, fileService, redditService, commentService);
+    let downloadController = new DownloadController(
+      configService,
+      fileService,
+      redditService,
+      commentService
+    );
 
     // Create necessary files
     await fileService.createDefaultFiles();
@@ -39,13 +44,19 @@ async function main() {
       await promptController.startPrompt();
 
       // Recreate download controller with updated config
-      downloadController = new DownloadController(configService.getRuntimeConfig(), logger, fileService, redditService, commentService);
+      downloadController = new DownloadController(
+        configService,
+        fileService,
+        redditService,
+        commentService
+      );
+      
       // Get fresh config after prompt
       const updatedConfig = configService.getRuntimeConfig();
       await startDownloads(downloadController, updatedConfig.subredditList);
     } else if (config.download_post_list_options.enabled) {
       // Handle post list downloads
-      await handlePostListDownloads(downloadController, config, logger);
+      await handlePostListDownloads(downloadController, config);
     } else {
       // Handle testing mode downloads
       await startDownloads(downloadController, config.subredditList);
@@ -63,11 +74,12 @@ async function startDownloads(downloadController: DownloadController, subreddits
   }
 }
 
-async function handlePostListDownloads(downloadController: DownloadController, config: RuntimeConfig, logger: LogService): Promise<void> {
+async function handlePostListDownloads(downloadController: DownloadController, config: RuntimeConfig): Promise<void> {
   if (config.download_post_list_options.repeatForever) {
     while (true) {
       await downloadController.startDownload("");
       downloadController.resetStats();
+      const logger = downloadController["logger"];
       logger.log(`⏲️ Waiting ${config.download_post_list_options.timeBetweenRuns / 1000} seconds before rerunning...`, false);
       await new Promise((resolve) => setTimeout(resolve, config.download_post_list_options.timeBetweenRuns));
     }

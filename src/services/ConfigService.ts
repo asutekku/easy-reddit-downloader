@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import { UserConfig } from "../types/config";
 import { RuntimeConfig } from "../types/runtime";
 import { SortTime, SortType } from "../types/types";
@@ -132,5 +133,86 @@ export class ConfigService {
 
   public getLogger(): LogService {
     return this.logger;
+  }
+
+  public async saveScrapeState(subreddits: string[], lastPostId: string | null): Promise<void> {
+    try {
+      const config = this.getRuntimeConfig();
+      const currentDate = new Date().toISOString().split('T')[0]!; // Get just the date part
+      const subredditString = subreddits.join('_');
+      const scrapeStateDir = path.join(process.cwd(), 'scrape_states');
+      
+      if (!fs.existsSync(scrapeStateDir)) {
+        fs.mkdirSync(scrapeStateDir, { recursive: true });
+      }
+
+      // Find existing state file for today
+      const files = await fs.promises.readdir(scrapeStateDir);
+      // Find existing state file for today
+      const todayFile = files.find(file => 
+        file.startsWith(currentDate) && 
+        file.includes(subredditString) &&
+        file.endsWith('_state.json')
+      ) || `${currentDate}_${subredditString}_state.json`;
+
+      const fileName = todayFile;
+      const filePath = path.join(scrapeStateDir, fileName);
+
+      const scrapeState: UserConfig = {
+        ...config,
+        last_post_id: lastPostId || undefined,
+        scrape_finished: lastPostId === null // If lastPostId is null, the scrape was finished
+      };
+
+      await fs.promises.writeFile(filePath, JSON.stringify(scrapeState, null, 2));
+      this.logger.log(`Updated scrape state in ${fileName}`, true);
+    } catch (error) {
+      this.logger.logError(`Failed to save scrape state: ${error}`);
+    }
+  }
+
+  public async findLastScrapeState(subreddits: string[]): Promise<UserConfig | null> {
+    try {
+      const scrapeStateDir = path.join(process.cwd(), 'scrape_states');
+      if (!fs.existsSync(scrapeStateDir)) {
+        return null;
+      }
+
+      const subredditSet = new Set(subreddits);
+      const files = await fs.promises.readdir(scrapeStateDir);
+      console.log(files);
+      
+      // Filter and sort files by timestamp (newest first)
+      const relevantFiles = files
+        .filter(file => {
+          const fileSubreddits = file.split('_state.json')[0]?.split('_')?.slice(1) || []; // Skip timestamp parts
+          console.log(fileSubreddits);
+          return fileSubreddits.length > 0 && fileSubreddits.every(sub => subredditSet.has(sub));
+        })
+        .sort((a, b) => b.localeCompare(a)); // Sort descending
+
+      if (relevantFiles.length === 0) {
+        return null;
+      }
+
+      const latestFile = relevantFiles[0];
+      if (!latestFile) {
+        return null;
+      }
+      
+      const latestStatePath = path.join(scrapeStateDir, latestFile);
+      const stateContent = await fs.promises.readFile(latestStatePath, 'utf-8');
+      const state = JSON.parse(stateContent) as UserConfig;
+
+      if (!state.scrape_finished) {
+        this.logger.log(`Found unfinished scrape state from ${relevantFiles[0]}`, true);
+        return state;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.logError(`Failed to find last scrape state: ${error}`);
+      return null;
+    }
   }
 }

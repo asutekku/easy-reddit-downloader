@@ -130,6 +130,9 @@ dist
 # user downloads
 downloads
 
+#states
+scrape_states
+
 # testing
 testing_folder
 

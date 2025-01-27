@@ -79,7 +79,7 @@ export class RedditService {
     }
 
     public getPostType(post: RedditPost): PostType {
-        this.logger.log(`Analyzing post with title: ${post.title}) and URL: ${post.url}`, true);
+        this.logger.log(`Analyzing post with title: [${post.title}] and URL: <${post.permalink}>`, true);
 
         if (post.post_hint === "self" || post.is_self) {
             return "self";

@@ -14,6 +14,7 @@ export class DownloadController {
   private downloadedPosts: PostStats;
   private startTime: Date | null = null;
   private commentService: CommentService;
+  private currentBatch: number = 0;
 
   constructor(
     configService: ConfigService,
@@ -45,6 +46,7 @@ export class DownloadController {
   public async startDownload(subreddit: string, lastPostId: string | null = null): Promise<void> {
     this.logger.log(`Starting downloading for r/${subreddit}`, false);
     this.startTime = new Date();
+    this.currentBatch = 0;
     this.fileService.makeDirectories();
 
     try {
@@ -66,7 +68,8 @@ export class DownloadController {
       }
 
       const totalPosts = response.data.children.length;
-      this.logger.log(`Processing first batch ${totalPosts} posts from r/${subreddit}...`, false);
+      this.currentBatch++;
+      this.logger.log(`Processing batch #${this.currentBatch} (${totalPosts} posts) from r/${subreddit}...`, false);
 
       for (let i = 0; i < response.data.children.length; i++) {
         const child = response.data.children[i];
@@ -98,8 +101,11 @@ export class DownloadController {
           ? response.data.children.length === limit // If numberOfPosts is 0, continue until we get less than limit
           : this.getPostsRemaining() > 0; // Otherwise check remaining posts
 
-      if (response.data.children.length === limit && shouldContinue) {
-        const lastPost = response.data.children[response.data.children.length - 1]!.data;
+      // Save state after each batch
+      const lastPost = response.data.children[response.data.children.length - 1]?.data;
+      await this.configService.saveScrapeState([subreddit], shouldContinue ? lastPost?.name || null : null);
+
+      if (response.data.children.length === limit && shouldContinue && lastPost) {
         await this.startDownload(subreddit, lastPost.name);
       }
     } catch (error) {

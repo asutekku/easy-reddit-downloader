@@ -68,23 +68,32 @@ async function main() {
 }
 
 async function startDownloads(downloadController: DownloadController, subreddits: string[]): Promise<void> {
+  const configService = downloadController["configService"] as ConfigService;
+  const config = configService.getRuntimeConfig();
+  
+  // Only use last post ID if it came from the prompt controller
+  // (which means user chose to continue an existing scrape)
+  const lastPostId = config.last_post_id;
+
   for (const subreddit of subreddits) {
-    await downloadController.startDownload(subreddit);
+    await downloadController.startDownload(subreddit, lastPostId || null);
     downloadController.resetStats();
   }
 }
 
 async function handlePostListDownloads(downloadController: DownloadController, config: RuntimeConfig): Promise<void> {
+  const lastPostId = config.last_post_id;
+
   if (config.download_post_list_options.repeatForever) {
     while (true) {
-      await downloadController.startDownload("");
+      await downloadController.startDownload("", lastPostId || null);
       downloadController.resetStats();
       const logger = downloadController["logger"];
       logger.log(`⏲️ Waiting ${config.download_post_list_options.timeBetweenRuns / 1000} seconds before rerunning...`, false);
       await new Promise((resolve) => setTimeout(resolve, config.download_post_list_options.timeBetweenRuns));
     }
   } else {
-    await downloadController.startDownload("");
+    await downloadController.startDownload("", lastPostId || null);
   }
 }
 

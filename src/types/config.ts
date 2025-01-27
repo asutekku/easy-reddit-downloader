@@ -44,4 +44,6 @@ export interface UserConfig {
   separate_clean_nsfw: boolean;
   redownload_posts: boolean;
   detailed_logs: boolean;
+  last_post_id?: string; // will be used when continuing and old fetch
+  scrape_finished?: boolean; // will be used when continuing and old fetch
 }

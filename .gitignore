@@ -135,6 +135,7 @@ scrape_states
 
 # testing
 testing_folder
+merger
 
 # config
 user_config.json

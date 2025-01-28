@@ -1,6 +1,5 @@
-import axios from 'axios';
-import { UserAgentService } from './UserAgentService';
 import { LogService } from './LogService';
+import { ApiService } from './ApiService';
 import { PostType, RedditApiResponse, RedditPost } from '../types/types';
 import ytdl from 'ytdl-core';
 import ffmpeg from 'fluent-ffmpeg';
@@ -10,60 +9,34 @@ import { ConfigService } from './ConfigService';
 export class RedditService {
     private configService: ConfigService;
     private logger: LogService;
-    private postDelayMilliseconds: number = 250;
-    private maxRetries: number = 5;
-    private initialRetryDelay: number = 5000;
+    private apiService: ApiService;
 
     constructor(configService: ConfigService) {
         this.configService = configService;
         this.logger = configService.getLogger();
+        this.apiService = new ApiService(this.logger);
     }
 
     public async fetchPosts(subreddit: string, lastPostId: string | null, limit: number): Promise<RedditApiResponse | null> {
-        let retryCount = 0;
-        let delay = this.initialRetryDelay;
+        try {
+            const url = this.buildRedditUrl(subreddit, lastPostId, limit);
+            const data = await this.apiService.get<RedditApiResponse>(url);
 
-        while (retryCount <= this.maxRetries) {
-            try {
-                const url = this.buildRedditUrl(subreddit, lastPostId, limit);
-                this.logger.log(`\n\n👀 Requesting posts from ${url}\n`, true);
-
-            const response = await axios.get(url, UserAgentService.getAxiosConfig());
-                const data: RedditApiResponse = response.data;
-
-                if (!data || data.message === "Not Found" || data.data.children.length === 0) {
-                    throw new Error("No data found");
-                }
-
-                return data;
-            } catch (err: any) {
-                const isLastAttempt = retryCount === this.maxRetries;
-                const isRateLimitError = err.response?.status === 429;
-                const isServerError = err.response?.status >= 500;
-                
-                if (!isLastAttempt && (isRateLimitError || isServerError || err.code === 'ECONNRESET')) {
-                    this.logger.log(
-                        `\n⚠️ Attempt ${retryCount + 1}/${this.maxRetries + 1} failed. Retrying in ${delay/1000} seconds...`,
-                        true
-                    );
-                    
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    retryCount++;
-                    delay *= 2; // Exponential backoff
-                    continue;
-                }
-
-                this.logger.logError(
-                    `\n\nERROR: There was a problem fetching posts for ${subreddit}. ${
-                        isRateLimitError ? 'Rate limit exceeded.' :
-                        isServerError ? 'Reddit server error.' :
-                        'This is likely because the subreddit is private, banned, or doesn\'t exist.'
-                    }`
-                );
-                return null;
+            if (!data || data.message === "Not Found" || data.data.children.length === 0) {
+                throw new Error("No data found");
             }
+
+            return data;
+        } catch (err: any) {
+            this.logger.logError(
+                `\n\nERROR: There was a problem fetching posts for ${subreddit}. ${
+                    err.response?.status === 429 ? 'Rate limit exceeded.' :
+                    err.response?.status >= 500 ? 'Reddit server error.' :
+                    'This is likely because the subreddit is private, banned, or doesn\'t exist.'
+                }`
+            );
+            return null;
         }
-        return null;
     }
 
     private buildRedditUrl(subreddit: string, lastPostId: string | null, limit: number): string {
@@ -113,29 +86,13 @@ export class RedditService {
     }
 
     public async downloadMediaFile(downloadURL: string, filePath: string): Promise<void> {
-        try {
-            const response = await axios({
-                method: "GET",
-                url: downloadURL,
-                responseType: "stream",
-                ...UserAgentService.getAxiosConfig()
-            });
-
-            return new Promise((resolve, reject) => {
-                const writer = fs.createWriteStream(filePath);
-                response.data.pipe(writer);
-
-                writer.on("finish", resolve);
-                writer.on("error", reject);
-            });
-        } catch (error: any) {
-            if (error.code === "ENOTFOUND") {
-                this.logger.logError("ERROR: Hostname not found for: " + downloadURL + "\n... skipping post");
-            } else {
-                this.logger.logError("ERROR: " + error);
-            }
-            throw error;
-        }
+        const stream = await this.apiService.downloadStream(downloadURL);
+        return new Promise((resolve, reject) => {
+            const writer = fs.createWriteStream(filePath);
+            stream.pipe(writer);
+            writer.on("finish", resolve);
+            writer.on("error", reject);
+        });
     }
 
     public async downloadYouTubeVideo(url: string, filePath: string): Promise<void> {
@@ -189,6 +146,6 @@ export class RedditService {
     }
 
     public async sleep(): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, this.postDelayMilliseconds));
+        return new Promise(resolve => setTimeout(resolve, 250)); // Using default delay of 250ms
     }
 }

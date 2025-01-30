@@ -23,6 +23,7 @@ export class ConfigService {
       numberOfPosts: config.testingMode ? config.testingModeOptions.numberOfPosts : 0,
       sorting: config.testingMode ? config.testingModeOptions.sorting : "top",
       time: config.testingMode ? config.testingModeOptions.time : "all",
+      searchType: "post",
       repeatForever: config.testingMode ? config.testingModeOptions.repeatForever : false,
       timeBetweenRuns: config.testingMode ? config.testingModeOptions.timeBetweenRuns : 0,
       downloadDirectory: config.testingMode ? config.testingModeOptions.downloadDirectory : "./downloads",
@@ -33,9 +34,11 @@ export class ConfigService {
     if (fs.existsSync("user_config.json")) {
       try {
         const userConfig = require("../../user_config.json") as UserConfig;
+        const initializedConfig = this.initializeRuntimeConfig(userConfig);
         this.runtimeConfig = {
           ...userConfig,
-          ...this.initializeRuntimeConfig(userConfig),
+          ...initializedConfig,
+          searchType: initializedConfig.searchType // Ensure searchType is explicitly set
         };
         this.validateConfig();
       } catch (error) {
@@ -51,9 +54,11 @@ export class ConfigService {
     try {
       await fs.promises.copyFile("user_config_DEFAULT.json", "user_config.json");
       this.logger.log("user_config.json was created. Edit it to manage user options.", true);
+      const initializedConfig = this.initializeRuntimeConfig(this.defaultConfig);
       this.runtimeConfig = {
         ...this.defaultConfig,
-        ...this.initializeRuntimeConfig(this.defaultConfig),
+        ...initializedConfig,
+        searchType: initializedConfig.searchType // Ensure searchType is explicitly set
       };
     } catch (error) {
       this.logger.logError("Error creating default config: " + error);
@@ -131,6 +136,10 @@ export class ConfigService {
     this.runtimeConfig.downloadDirectory = directory || "./downloads";
   }
 
+  public setSearchType(type: "post" | "comment"): void {
+    this.runtimeConfig.searchType = type;
+  }
+
   public getLogger(): LogService {
     return this.logger;
   }
@@ -138,10 +147,10 @@ export class ConfigService {
   public async saveScrapeState(subreddits: string[], lastPostId: string | null): Promise<void> {
     try {
       const config = this.getRuntimeConfig();
-      const currentDate = new Date().toISOString().split('T')[0]!; // Get just the date part
-      const subredditString = subreddits.join('_');
-      const scrapeStateDir = path.join(process.cwd(), 'scrape_states');
-      
+      const currentDate = new Date().toISOString().split("T")[0]!; // Get just the date part
+      const subredditString = subreddits.join("_");
+      const scrapeStateDir = path.join(process.cwd(), "scrape_states");
+
       if (!fs.existsSync(scrapeStateDir)) {
         fs.mkdirSync(scrapeStateDir, { recursive: true });
       }
@@ -149,11 +158,9 @@ export class ConfigService {
       // Find existing state file for today
       const files = await fs.promises.readdir(scrapeStateDir);
       // Find existing state file for today
-      const todayFile = files.find(file => 
-        file.startsWith(currentDate) && 
-        file.includes(subredditString) &&
-        file.endsWith('_state.json')
-      ) || `${currentDate}_${subredditString}_state.json`;
+      const todayFile =
+        files.find((file) => file.startsWith(currentDate) && file.includes(subredditString) && file.endsWith("_state.json")) ||
+        `${currentDate}_${subredditString}_state.json`;
 
       const fileName = todayFile;
       const filePath = path.join(scrapeStateDir, fileName);
@@ -161,7 +168,7 @@ export class ConfigService {
       const scrapeState: UserConfig = {
         ...config,
         last_post_id: lastPostId || undefined,
-        scrape_finished: lastPostId === null // If lastPostId is null, the scrape was finished
+        scrape_finished: lastPostId === null, // If lastPostId is null, the scrape was finished
       };
 
       await fs.promises.writeFile(filePath, JSON.stringify(scrapeState, null, 2));
@@ -173,21 +180,19 @@ export class ConfigService {
 
   public async findLastScrapeState(subreddits: string[]): Promise<UserConfig | null> {
     try {
-      const scrapeStateDir = path.join(process.cwd(), 'scrape_states');
+      const scrapeStateDir = path.join(process.cwd(), "scrape_states");
       if (!fs.existsSync(scrapeStateDir)) {
         return null;
       }
 
-      const subredditSet = new Set(subreddits);
+      const subredditSet = new Set(subreddits.map((s: string) => s.replace("?", "!")));
       const files = await fs.promises.readdir(scrapeStateDir);
-      console.log(files);
-      
+
       // Filter and sort files by timestamp (newest first)
       const relevantFiles = files
-        .filter(file => {
-          const fileSubreddits = file.split('_state.json')[0]?.split('_')?.slice(1) || []; // Skip timestamp parts
-          console.log(fileSubreddits);
-          return fileSubreddits.length > 0 && fileSubreddits.every(sub => subredditSet.has(sub));
+        .filter((file) => {
+          const fileSubreddits = file.split("_state.json")[0]?.split("_")?.slice(1) || []; // Skip timestamp parts
+          return fileSubreddits.length > 0 && fileSubreddits.every((sub) => subredditSet.has(sub));
         })
         .sort((a, b) => b.localeCompare(a)); // Sort descending
 
@@ -199,9 +204,9 @@ export class ConfigService {
       if (!latestFile) {
         return null;
       }
-      
+
       const latestStatePath = path.join(scrapeStateDir, latestFile);
-      const stateContent = await fs.promises.readFile(latestStatePath, 'utf-8');
+      const stateContent = await fs.promises.readFile(latestStatePath, "utf-8");
       const state = JSON.parse(stateContent) as UserConfig;
 
       if (!state.scrape_finished) {

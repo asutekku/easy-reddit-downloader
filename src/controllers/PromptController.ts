@@ -16,14 +16,15 @@ export class PromptController {
     const subredditQuestion: PromptObject = {
       type: "text",
       name: "subreddit",
-      message: "Which subreddits or users would you like to download? You may submit multiple separated by commas (no spaces).",
+      message:
+        "Which subreddits or users would you like to download? You may submit multiple separated by commas (no spaces). To search articles on given subreddit, use the following format: pics?cats",
       validate: (value: string) => (value.length < 1 ? `Please enter at least one subreddit or user` : true),
     };
 
     const { subreddit } = await prompts(subredditQuestion, {
       onCancel: () => {
         throw new Error("Prompt was cancelled");
-      }
+      },
     });
     if (!subreddit) {
       throw new Error("No subreddit provided");
@@ -33,7 +34,9 @@ export class PromptController {
     const existingScrape = await this.configService.findLastScrapeState(subredditList);
 
     let questions: PromptObject[] = [];
-    
+    let hasSearch = subredditList.some((f) => f.includes("?"));
+    let searchType: "comment" | "post" = "post";
+
     // If there's an existing scrape, ask if user wants to continue it
     if (existingScrape && !existingScrape.scrape_finished) {
       const continueQuestion: PromptObject = {
@@ -48,9 +51,9 @@ export class PromptController {
       const { continueExisting } = await prompts(continueQuestion, {
         onCancel: () => {
           throw new Error("Prompt was cancelled");
-        }
+        },
       });
-      
+
       if (continueExisting) {
         // Create runtime config from the saved state
         const savedRuntimeConfig = existingScrape as unknown as RuntimeConfig;
@@ -58,34 +61,43 @@ export class PromptController {
           ...savedRuntimeConfig,
           subredditList, // Override with current subreddits
           // Keep existing runtime values or use testing mode values if available
-          numberOfPosts: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.numberOfPosts 
-            : savedRuntimeConfig.numberOfPosts,
-          sorting: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.sorting 
-            : savedRuntimeConfig.sorting,
-          time: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.time 
-            : savedRuntimeConfig.time,
-          repeatForever: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.repeatForever 
-            : savedRuntimeConfig.repeatForever,
-          timeBetweenRuns: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.timeBetweenRuns 
+          numberOfPosts: existingScrape.testingMode ? existingScrape.testingModeOptions.numberOfPosts : savedRuntimeConfig.numberOfPosts,
+          sorting: existingScrape.testingMode ? existingScrape.testingModeOptions.sorting : savedRuntimeConfig.sorting,
+          time: existingScrape.testingMode ? existingScrape.testingModeOptions.time : savedRuntimeConfig.time,
+          repeatForever: existingScrape.testingMode ? existingScrape.testingModeOptions.repeatForever : savedRuntimeConfig.repeatForever,
+          timeBetweenRuns: existingScrape.testingMode
+            ? existingScrape.testingModeOptions.timeBetweenRuns
             : savedRuntimeConfig.timeBetweenRuns,
-          downloadDirectory: existingScrape.testingMode 
-            ? existingScrape.testingModeOptions.downloadDirectory 
-            : (savedRuntimeConfig.downloadDirectory || "./downloads"),
-        
-          };
-        
+          downloadDirectory: existingScrape.testingMode
+            ? existingScrape.testingModeOptions.downloadDirectory
+            : savedRuntimeConfig.downloadDirectory || "./downloads",
+        };
+
         // Update both configs to ensure consistency
         this.configService["defaultConfig"] = existingScrape;
         this.configService["runtimeConfig"] = runtimeConfig;
-        
+
         this.configService.getLogger().log("Loaded previous configuration and scrape state", true);
         return;
       }
+    } else if (hasSearch) {
+      const searchTypeQuestion: PromptObject = {
+        type: "select",
+        name: "searchType",
+        message: "A question mark was found in the subreddit name indicating a search request, do you want to search posts or comments?",
+        choices: [
+          { title: "Posts", value: "post" },
+          { title: "Comments", value: "comment" }
+        ],
+        initial: 0,
+      };
+
+      const { searchType: promptSearchType } = await prompts(searchTypeQuestion, {
+        onCancel: () => {
+          throw new Error("Prompt was cancelled");
+        },
+      });
+      searchType = promptSearchType;
     }
 
     // If no existing scrape or user chose not to continue, show remaining questions
@@ -135,7 +147,7 @@ export class PromptController {
     const result = await prompts(questions, {
       onCancel: () => {
         throw new Error("Prompt was cancelled");
-      }
+      },
     });
 
     // Validate required fields
@@ -145,20 +157,23 @@ export class PromptController {
 
     // Set the subreddit list since we already have it
     this.configService.setSubredditList(subredditList);
-    await this.processPromptResult({ 
+    await this.processPromptResult({
       ...result,
       subreddit,
-      numberOfPosts: result.numberOfPosts ?? 0 // Default to 0 if not provided
+      searchType,
+      numberOfPosts: result.numberOfPosts ?? 0, // Default to 0 if not provided
     });
   }
 
   private async processPromptResult(result: any): Promise<void> {
-
     const subredditList = cleanSubreddits(result.subreddit.split(","));
     this.configService.setSubredditList(subredditList);
 
     const numberOfPosts = result.numberOfPosts;
     this.configService.setNumberOfPosts(numberOfPosts);
+
+    const searchType = result.searchType;
+    this.configService.setSearchType(searchType);
 
     const sorting = result.sorting.replace(/\s/g, "") as SortType;
     this.configService.setSorting(sorting);
@@ -185,6 +200,7 @@ export class PromptController {
       numberOfPosts,
       sorting,
       time,
+      searchType,
       repeatForever,
       timeBetweenRuns: repeatForever ? result.timeBetweenRuns : 0,
       downloadDirectory: result.downloadDirectory || "./downloads",

@@ -16,12 +16,7 @@ export class DownloadController {
   private commentService: CommentService;
   private currentBatch: number = 0;
 
-  constructor(
-    configService: ConfigService,
-    fileService: FileService,
-    redditService: RedditService,
-    commentService: CommentService
-  ) {
+  constructor(configService: ConfigService, fileService: FileService, redditService: RedditService, commentService: CommentService) {
     this.configService = configService;
     this.logger = configService.getLogger();
     this.fileService = fileService;
@@ -44,14 +39,33 @@ export class DownloadController {
   }
 
   public async startDownload(subreddit: string, lastPostId: string | null = null): Promise<void> {
-    this.logger.log(`Starting downloading for r/${subreddit}`, false);
+    let isSearch = false;
+    let searchString = "";
+    let subredditName = subreddit;
+    if (subreddit.split("?")[1] !== null) {
+      isSearch = true;
+      searchString = subreddit.split("?")[1]!;
+      subredditName = subreddit.split("?")[0]!;
+    }
+    console.log(this.configService.getRuntimeConfig());
+    this.logger.log(
+      `Starting downloading ${this.configService.getRuntimeConfig().searchType === "post" ? "posts" : "comments"} for ${
+        isSearch ? `r/${subredditName} with search query "${searchString}"` : subreddit
+      }`,
+      false
+    );
     this.startTime = new Date();
     this.currentBatch = 0;
     this.fileService.makeDirectories();
 
     try {
       const limit = 25;
-      const response = await this.redditService.fetchPosts(subreddit, lastPostId, limit);
+      let response = undefined;
+      if (isSearch) {
+        response = await this.redditService.searchPosts(subredditName, lastPostId, limit, searchString);
+      } else {
+        response = await this.redditService.fetchPosts(subreddit, lastPostId, limit);
+      }
 
       if (!response) {
         return;
@@ -103,7 +117,7 @@ export class DownloadController {
 
       // Save state after each batch
       const lastPost = response.data.children[response.data.children.length - 1]?.data;
-      await this.configService.saveScrapeState([subreddit], shouldContinue ? lastPost?.name || null : null);
+      await this.configService.saveScrapeState([subreddit.replace("?", "!")], shouldContinue ? lastPost?.name || null : null);
 
       if (response.data.children.length === limit && shouldContinue && lastPost) {
         await this.startDownload(subreddit, lastPost.name);
